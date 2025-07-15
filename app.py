@@ -180,32 +180,15 @@ from fpdf import FPDF
 import pandas as pd
 from datetime import datetime
 
-@app.route("/api/transactions_pdf", methods=["GET"])
-def generate_pdf_report():
-    # Get query parameters
-    txn_type = request.args.get("type")
-    status = request.args.get("status")
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
+import io
+from flask import send_file
 
-    # Base query
-    query = Transaction.query
-
-    if txn_type:
-        query = query.filter(Transaction.type == txn_type)
-    if status:
-        query = query.filter(Transaction.status == status)
-    if start_date:
-        query = query.filter(Transaction.date >= start_date)
-    if end_date:
-        query = query.filter(Transaction.date <= end_date)
-
-    transactions = query.all()
-
+@app.route("/api/export_csv", methods=["GET"])
+def export_csv():
+    transactions = Transaction.query.all()
     if not transactions:
         return jsonify({"error": "No transactions found"}), 404
 
-    # Convert to DataFrame
     data = [{
         "Date": t.date,
         "Type": t.type,
@@ -215,38 +198,53 @@ def generate_pdf_report():
         "Amount": t.amount,
         "Purpose": t.purpose
     } for t in transactions]
+
     df = pd.DataFrame(data)
 
-    # Group by Type and sum Amount
-    summary = df.groupby("Type")["Amount"].sum()
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
 
-    # Build PDF
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
+    return send_file(
+        io.BytesIO(csv_buffer.getvalue().encode()),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="SmartBooks_Transactions.csv"
+    )
 
-    pdf.cell(200, 10, txt="SmartBooks Transaction Summary", ln=True, align="C")
-    pdf.ln(10)
+@app.route("/api/export_xlsx", methods=["GET"])
+def export_xlsx():
+    transactions = Transaction.query.all()
+    if not transactions:
+        return jsonify({"error": "No transactions found"}), 404
 
-    pdf.set_font("Arial", "B", size=12)
-    pdf.cell(100, 10, "Transaction Type", border=1)
-    pdf.cell(50, 10, "Total Amount", border=1)
-    pdf.ln()
+    data = [{
+        "Date": t.date,
+        "Type": t.type,
+        "Status": t.status,
+        "Source": t.source_account,
+        "Destination": t.destination_account,
+        "Amount": t.amount,
+        "Purpose": t.purpose
+    } for t in transactions]
 
-    pdf.set_font("Arial", size=12)
-    for ttype, amount in summary.items():
-        pdf.cell(100, 10, ttype, border=1)
-        pdf.cell(50, 10, f"{amount:.2f}", border=1)
-        pdf.ln()
+    df = pd.DataFrame(data)
 
-    response = app.response_class(pdf.output(dest='S').encode('latin1'), mimetype='application/pdf')
-    response.headers['Content-Disposition'] = 'inline; filename=SmartBooks_Report.pdf'
-    return response
+    xlsx_buffer = io.BytesIO()
+    with pd.ExcelWriter(xlsx_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Transactions")
+    xlsx_buffer.seek(0)
 
-
+    return send_file(
+        xlsx_buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="SmartBooks_Transactions.xlsx"
+    )
 
 # 🟢 Start the app
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
     app.run(debug=True)
+
