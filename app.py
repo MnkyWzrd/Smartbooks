@@ -38,19 +38,47 @@ from sqlalchemy import and_
 from datetime import datetime
 
 # Get a single transaction by ID
-@app.route("/api/transactions/<int:id>", methods=["GET"])
-def get_transaction(id):
-    txn = Transaction.query.get_or_404(id)
-    return jsonify({
-        "id": txn.id,
-        "date": txn.date,
-        "type": txn.type,
-        "status": txn.status,
-        "source_account": txn.source_account,
-        "destination_account": txn.destination_account,
-        "amount": txn.amount,
-        "purpose": txn.purpose
-    })
+@app.route("/api/transactions", methods=["GET"])
+def get_transactions():
+    query = Transaction.query
+        # Optional filter: status
+    txn_status = request.args.get("status")
+    if txn_status:
+        query = query.filter_by(status=txn_status)
+
+    # Optional filter: source_account
+    source = request.args.get("source_account")
+    if source:
+        query = query.filter_by(source_account=source)
+
+    # Optional filter: destination_account
+    destination = request.args.get("destination_account")
+    if destination:
+        query = query.filter_by(destination_account=destination)
+
+
+    # Optional filter: type
+    txn_type = request.args.get("type")
+    if txn_type:
+        query = query.filter_by(type=txn_type)
+
+    transactions = query.all()
+    result = []
+    for t in transactions:
+        result.append({
+            "id": t.id,
+            "date": t.date,
+            "type": t.type,
+            "status": t.status,
+            "source_account": t.source_account,
+            "destination_account": t.destination_account,
+            "amount": t.amount,
+            "purpose": t.purpose
+        })
+    return jsonify(result)
+
+
+
 
 # Get all transactions with optional filters
 
