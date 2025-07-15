@@ -37,10 +37,23 @@ def add_transaction():
 from sqlalchemy import and_
 from datetime import datetime
 
-# Get a single transaction by ID
 @app.route("/api/transactions", methods=["GET"])
 def get_transactions():
     query = Transaction.query
+
+    sort_param = request.args.get("sort")
+    if sort_param:
+        sort_fields = sort_param.split(",")
+        for field in sort_fields:
+            desc = field.startswith("-")
+            attr = field.lstrip("-")
+
+            if hasattr(Transaction, attr):
+                column = getattr(Transaction, attr)
+                query = query.order_by(column.desc() if desc else column)
+
+    transactions = query.all()
+
         # Optional filter: status
     txn_status = request.args.get("status")
     if txn_status:
