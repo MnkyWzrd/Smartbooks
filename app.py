@@ -34,9 +34,38 @@ def add_transaction():
     return jsonify({"message": "Transaction added!"}), 201
 
 # Get all transactions
+from sqlalchemy import and_
+from datetime import datetime
+
 @app.route("/api/transactions", methods=["GET"])
 def get_transactions():
-    transactions = Transaction.query.all()
+    query = Transaction.query
+
+    # Optional filters
+    txn_type = request.args.get("type")
+    status = request.args.get("status")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    if txn_type:
+        query = query.filter(Transaction.type == txn_type)
+    if status:
+        query = query.filter(Transaction.status == status)
+    if start_date:
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d")
+            query = query.filter(Transaction.date >= start)
+        except ValueError:
+            return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
+    if end_date:
+        try:
+            end = datetime.strptime(end_date, "%Y-%m-%d")
+            query = query.filter(Transaction.date <= end)
+        except ValueError:
+            return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
+
+    transactions = query.all()
+
     result = []
     for t in transactions:
         result.append({
@@ -49,7 +78,9 @@ def get_transactions():
             "amount": t.amount,
             "purpose": t.purpose
         })
+
     return jsonify(result)
+
 
 # ✅ Add multiple transactions at once (batch)
 from io import StringIO
@@ -151,54 +182,67 @@ from datetime import datetime
 
 @app.route("/api/transactions_pdf", methods=["GET"])
 def generate_pdf_report():
-    transactions = Transaction.query.all()
+    # Get query parameters
+    txn_type = request.args.get("type")
+    status = request.args.get("status")
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    # Base query
+    query = Transaction.query
+
+    if txn_type:
+        query = query.filter(Transaction.type == txn_type)
+    if status:
+        query = query.filter(Transaction.status == status)
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+
+    transactions = query.all()
 
     if not transactions:
         return jsonify({"error": "No transactions found"}), 404
 
-    # Convert transactions to a Pandas DataFrame
+    # Convert to DataFrame
     data = [{
         "Date": t.date,
         "Type": t.type,
         "Status": t.status,
         "Source": t.source_account,
         "Destination": t.destination_account,
-        "Amount": f"{t.amount:.2f}",
+        "Amount": t.amount,
         "Purpose": t.purpose
     } for t in transactions]
-
     df = pd.DataFrame(data)
 
-    # Initialize PDF
+    # Group by Type and sum Amount
+    summary = df.groupby("Type")["Amount"].sum()
+
+    # Build PDF
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(200, 10, txt="SmartBooks - Full Transaction Report", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+
+    pdf.cell(200, 10, txt="SmartBooks Transaction Summary", ln=True, align="C")
     pdf.ln(10)
 
-    # Table header
-    pdf.set_font("Arial", "B", 10)
-    col_widths = [25, 20, 20, 30, 30, 25, 40]
-    headers = df.columns.tolist()
-
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 10, header, 1)
+    pdf.set_font("Arial", "B", size=12)
+    pdf.cell(100, 10, "Transaction Type", border=1)
+    pdf.cell(50, 10, "Total Amount", border=1)
     pdf.ln()
 
-    # Table rows
-    pdf.set_font("Arial", size=9)
-    for _, row in df.iterrows():
-        for i, item in enumerate(row):
-            text = str(item)
-            if len(text) > 30:
-                text = text[:27] + "..."
-            pdf.cell(col_widths[i], 10, text, 1)
+    pdf.set_font("Arial", size=12)
+    for ttype, amount in summary.items():
+        pdf.cell(100, 10, ttype, border=1)
+        pdf.cell(50, 10, f"{amount:.2f}", border=1)
         pdf.ln()
 
-    # Return PDF
     response = app.response_class(pdf.output(dest='S').encode('latin1'), mimetype='application/pdf')
-    response.headers['Content-Disposition'] = 'inline; filename=SmartBooks_Full_Report.pdf'
+    response.headers['Content-Disposition'] = 'inline; filename=SmartBooks_Report.pdf'
     return response
+
 
 
 # 🟢 Start the app
