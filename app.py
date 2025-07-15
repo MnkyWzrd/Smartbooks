@@ -37,49 +37,49 @@ def add_transaction():
 from sqlalchemy import and_
 from datetime import datetime
 
-@app.route("/api/transactions", methods=["GET"])
-def get_transactions():
+# Get a single transaction by ID
+@app.route("/api/transactions/<int:id>", methods=["GET"])
+def get_transaction(id):
+    txn = Transaction.query.get_or_404(id)
+    return jsonify({
+        "id": txn.id,
+        "date": txn.date,
+        "type": txn.type,
+        "status": txn.status,
+        "source_account": txn.source_account,
+        "destination_account": txn.destination_account,
+        "amount": txn.amount,
+        "purpose": txn.purpose
+    })
+
+# Get all transactions with optional filters
+
+
+    # Start building query
     query = Transaction.query
 
-    # Optional filters
-    txn_type = request.args.get("type")
-    status = request.args.get("status")
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    if txn_type:
-        query = query.filter(Transaction.type == txn_type)
+    if t_type:
+        query = query.filter_by(type=t_type)
     if status:
-        query = query.filter(Transaction.status == status)
-    if start_date:
-        try:
-            start = datetime.strptime(start_date, "%Y-%m-%d")
-            query = query.filter(Transaction.date >= start)
-        except ValueError:
-            return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
-    if end_date:
-        try:
-            end = datetime.strptime(end_date, "%Y-%m-%d")
-            query = query.filter(Transaction.date <= end)
-        except ValueError:
-            return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
+        query = query.filter_by(status=status)
+    if start_date and end_date:
+        query = query.filter(Transaction.date.between(start_date, end_date))
 
     transactions = query.all()
 
-    result = []
-    for t in transactions:
-        result.append({
-            "id": t.id,
-            "date": t.date,
-            "type": t.type,
-            "status": t.status,
-            "source_account": t.source_account,
-            "destination_account": t.destination_account,
-            "amount": t.amount,
-            "purpose": t.purpose
-        })
+    result = [{
+        "id": t.id,
+        "date": t.date,
+        "type": t.type,
+        "status": t.status,
+        "source_account": t.source_account,
+        "destination_account": t.destination_account,
+        "amount": t.amount,
+        "purpose": t.purpose
+    } for t in transactions]
 
     return jsonify(result)
+
 
 
 # ✅ Add multiple transactions at once (batch)
