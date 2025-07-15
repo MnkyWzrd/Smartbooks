@@ -120,10 +120,6 @@ def add_transactions_batch():
     db.session.commit()
     return jsonify({"message": f"{len(transactions)} transactions added!"}), 201
 
-
-
-
-
 # Delete a transaction by ID
 @app.route("/api/transactions/<int:id>", methods=["DELETE"])
 def delete_transaction(id):
@@ -131,6 +127,79 @@ def delete_transaction(id):
     db.session.delete(txn)
     db.session.commit()
     return jsonify({"message": "Transaction deleted!"})
+
+# Edit a transaction by ID
+@app.route("/api/transactions/<int:id>", methods=["PUT"])
+def update_transaction(id):
+    txn = Transaction.query.get_or_404(id)
+    data = request.get_json()
+
+    txn.date = data.get("date", txn.date)
+    txn.type = data.get("type", txn.type)
+    txn.status = data.get("status", txn.status)
+    txn.source_account = data.get("source_account", txn.source_account)
+    txn.destination_account = data.get("destination_account", txn.destination_account)
+    txn.amount = data.get("amount", txn.amount)
+    txn.purpose = data.get("purpose", txn.purpose)
+
+    db.session.commit()
+    return jsonify({"message": "Transaction updated!"})
+
+from fpdf import FPDF
+import pandas as pd
+from datetime import datetime
+
+@app.route("/api/transactions_pdf", methods=["GET"])
+def generate_pdf_report():
+    transactions = Transaction.query.all()
+
+    if not transactions:
+        return jsonify({"error": "No transactions found"}), 404
+
+    # Convert transactions to a Pandas DataFrame
+    data = [{
+        "Date": t.date,
+        "Type": t.type,
+        "Status": t.status,
+        "Source": t.source_account,
+        "Destination": t.destination_account,
+        "Amount": f"{t.amount:.2f}",
+        "Purpose": t.purpose
+    } for t in transactions]
+
+    df = pd.DataFrame(data)
+
+    # Initialize PDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(200, 10, txt="SmartBooks - Full Transaction Report", ln=True, align="C")
+    pdf.ln(10)
+
+    # Table header
+    pdf.set_font("Arial", "B", 10)
+    col_widths = [25, 20, 20, 30, 30, 25, 40]
+    headers = df.columns.tolist()
+
+    for i, header in enumerate(headers):
+        pdf.cell(col_widths[i], 10, header, 1)
+    pdf.ln()
+
+    # Table rows
+    pdf.set_font("Arial", size=9)
+    for _, row in df.iterrows():
+        for i, item in enumerate(row):
+            text = str(item)
+            if len(text) > 30:
+                text = text[:27] + "..."
+            pdf.cell(col_widths[i], 10, text, 1)
+        pdf.ln()
+
+    # Return PDF
+    response = app.response_class(pdf.output(dest='S').encode('latin1'), mimetype='application/pdf')
+    response.headers['Content-Disposition'] = 'inline; filename=SmartBooks_Full_Report.pdf'
+    return response
+
 
 # 🟢 Start the app
 if __name__ == "__main__":
