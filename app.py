@@ -39,20 +39,40 @@ from datetime import datetime
 
 @app.route("/api/transactions", methods=["GET"])
 def get_transactions():
+    # Start a base query
     query = Transaction.query
 
-    sort_param = request.args.get("sort")
-    if sort_param:
-        sort_fields = sort_param.split(",")
-        for field in sort_fields:
-            desc = field.startswith("-")
-            attr = field.lstrip("-")
+    # Handle optional sorting
+    sort_by = request.args.get("sort_by")
+    sort_order = request.args.get("sort_order", "asc")
 
-            if hasattr(Transaction, attr):
-                column = getattr(Transaction, attr)
-                query = query.order_by(column.desc() if desc else column)
+    if sort_by in ["amount", "date", "type", "status"]:
+        column = getattr(Transaction, sort_by)
+        if sort_order == "desc":
+            query = query.order_by(column.desc())
+        else:
+            query = query.order_by(column.asc())
 
+    # Execute query
     transactions = query.all()
+
+    # Build result list
+    result = []
+    for t in transactions:
+        result.append({
+            "id": t.id,
+            "date": t.date,
+            "type": t.type,
+            "status": t.status,
+            "source_account": t.source_account,
+            "destination_account": t.destination_account,
+            "amount": t.amount,
+            "purpose": t.purpose
+        })
+
+    return jsonify(result)
+
+
 
         # Optional filter: status
     txn_status = request.args.get("status")
