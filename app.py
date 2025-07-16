@@ -17,21 +17,73 @@ def home():
     return "SmartBooks is running!"
 
 # Add new transaction
-@app.route("/api/transactions", methods=["POST"])
+@app.route('/api/transactions', methods=['POST'])
 def add_transaction():
-    data = request.get_json()
+    data = request.get_json()  # 🟢 Moved here first
+
+    required_fields = ["date", "type", "status", "source_account", "destination_account", "amount", "purpose"]
+
+    for field in required_fields:
+        if field not in data or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing or empty field: {field}"}), 400
+
+    # ✅ Date format validation
+    try:
+        datetime.strptime(data["date"], "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "Invalid date format. Expected YYYY-MM-DD."}), 400
+
+    try:
+        amount = float(data["amount"])
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount format"}), 400
+
     new_txn = Transaction(
         date=data["date"],
         type=data["type"],
         status=data["status"],
         source_account=data["source_account"],
         destination_account=data["destination_account"],
-        amount=data["amount"],
+        amount=amount,
+        purpose=data["purpose"]
+    )
+
+    db.session.add(new_txn)
+    db.session.commit()
+    return jsonify({"message": "Transaction added!"}), 201
+
+
+
+
+    # Create and add transaction
+    new_txn = Transaction(
+        date=data["date"],
+        type=data["type"],
+        status=data["status"],
+        source_account=data["source_account"],
+        destination_account=data["destination_account"],
+        amount=amount,
         purpose=data["purpose"]
     )
     db.session.add(new_txn)
     db.session.commit()
     return jsonify({"message": "Transaction added!"}), 201
+
+
+    new_txn = Transaction(
+        date=data["date"],
+        type=data["type"],
+        status=data["status"],
+        source_account=data["source_account"],
+        destination_account=data["destination_account"],
+        amount=amount,
+        purpose=data["purpose"]
+    )
+
+    db.session.add(new_txn)
+    db.session.commit()
+    return jsonify({"message": "Transaction added!"}), 201
+
 
 # Get all transactions
 from sqlalchemy import and_
@@ -215,27 +267,58 @@ def add_transactions_batch():
 # Delete a transaction by ID
 @app.route("/api/transactions/<int:id>", methods=["DELETE"])
 def delete_transaction(id):
-    txn = Transaction.query.get_or_404(id)
+    txn = Transaction.query.get(id)
+    if not txn:
+        return jsonify({"error": f"Transaction with ID {id} not found."}), 404
+
     db.session.delete(txn)
     db.session.commit()
     return jsonify({"message": "Transaction deleted!"})
 
-# Edit a transaction by ID
-@app.route("/api/transactions/<int:id>", methods=["PUT"])
+
+@app.route('/api/transactions/<int:id>', methods=['PUT'])
 def update_transaction(id):
-    txn = Transaction.query.get_or_404(id)
+    transaction = db.session.get(Transaction, id)
+    if not transaction:
+        return jsonify({"error": "Transaction not found"}), 404
+
     data = request.get_json()
 
+    required_fields = ["date", "type", "status", "source_account", "destination_account", "amount", "purpose"]
+    for field in required_fields:
+        if field not in data or str(data[field]).strip() == "":
+            return jsonify({"error": f"Missing or empty field: {field}"}), 400
+
+    try:
+        amount = float(data["amount"])
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount format"}), 400
+
+    transaction.date = data["date"]
+    transaction.type = data["type"]
+    transaction.status = data["status"]
+    transaction.source_account = data["source_account"]
+    transaction.destination_account = data["destination_account"]
+    transaction.amount = amount
+    transaction.purpose = data["purpose"]
+
+    db.session.commit()
+    return jsonify({"message": "Transaction updated!"}), 200
+ 
+
+
+    # Update fields if valid
     txn.date = data.get("date", txn.date)
     txn.type = data.get("type", txn.type)
     txn.status = data.get("status", txn.status)
     txn.source_account = data.get("source_account", txn.source_account)
     txn.destination_account = data.get("destination_account", txn.destination_account)
-    txn.amount = data.get("amount", txn.amount)
     txn.purpose = data.get("purpose", txn.purpose)
 
     db.session.commit()
     return jsonify({"message": "Transaction updated!"})
+
+
 
 from fpdf import FPDF
 import pandas as pd
