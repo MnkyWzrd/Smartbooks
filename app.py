@@ -1,38 +1,51 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from models import db, Transaction
+from datetime import datetime
+from sqlalchemy import and_
+from io import StringIO
+import csv
+import io
+import pandas as pd
+from fpdf import FPDF  # Imported but not used in this snippet
 
 app = Flask(__name__)
 
-# Connect to local SQLite database
+# ====================
+# Database Configuration
+# ====================
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///transactions.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Initialize database
 db.init_app(app)
+
+
+# ====================
+# Routes
+# ====================
 
 # Home route
 @app.route("/")
 def home():
     return "SmartBooks is running!"
 
-# Add new transaction
+
+# Add a new transaction
 @app.route('/api/transactions', methods=['POST'])
 def add_transaction():
-    data = request.get_json()  # 🟢 Moved here first
+    data = request.get_json()
 
     required_fields = ["date", "type", "status", "source_account", "destination_account", "amount", "purpose"]
-
     for field in required_fields:
         if field not in data or str(data[field]).strip() == "":
             return jsonify({"error": f"Missing or empty field: {field}"}), 400
 
-    # ✅ Date format validation
+    # Date format validation
     try:
         datetime.strptime(data["date"], "%Y-%m-%d")
     except ValueError:
         return jsonify({"error": "Invalid date format. Expected YYYY-MM-DD."}), 400
 
+    # Amount validation
     try:
         amount = float(data["amount"])
     except (ValueError, TypeError):
@@ -53,51 +66,31 @@ def add_transaction():
     return jsonify({"message": "Transaction added!"}), 201
 
 
-
-
-    # Create and add transaction
-    new_txn = Transaction(
-        date=data["date"],
-        type=data["type"],
-        status=data["status"],
-        source_account=data["source_account"],
-        destination_account=data["destination_account"],
-        amount=amount,
-        purpose=data["purpose"]
-    )
-    db.session.add(new_txn)
-    db.session.commit()
-    return jsonify({"message": "Transaction added!"}), 201
-
-
-    new_txn = Transaction(
-        date=data["date"],
-        type=data["type"],
-        status=data["status"],
-        source_account=data["source_account"],
-        destination_account=data["destination_account"],
-        amount=amount,
-        purpose=data["purpose"]
-    )
-
-    db.session.add(new_txn)
-    db.session.commit()
-    return jsonify({"message": "Transaction added!"}), 201
-
-
-# Get all transactions
-from sqlalchemy import and_
-from datetime import datetime
-
+# Get all transactions with optional filters and sorting
 @app.route("/api/transactions", methods=["GET"])
 def get_transactions():
-    # Start a base query
     query = Transaction.query
 
-    # Handle optional sorting
+    # Optional filters
+    txn_status = request.args.get("status")
+    if txn_status:
+        query = query.filter_by(status=txn_status)
+
+    source = request.args.get("source_account")
+    if source:
+        query = query.filter_by(source_account=source)
+
+    destination = request.args.get("destination_account")
+    if destination:
+        query = query.filter_by(destination_account=destination)
+
+    txn_type = request.args.get("type")
+    if txn_type:
+        query = query.filter_by(type=txn_type)
+
+    # Optional sorting
     sort_by = request.args.get("sort_by")
     sort_order = request.args.get("sort_order", "asc")
-
     if sort_by in ["amount", "date", "type", "status"]:
         column = getattr(Transaction, sort_by)
         if sort_order == "desc":
@@ -105,10 +98,8 @@ def get_transactions():
         else:
             query = query.order_by(column.asc())
 
-    # Execute query
     transactions = query.all()
 
-    # Build result list
     result = []
     for t in transactions:
         result.append({
@@ -125,88 +116,13 @@ def get_transactions():
     return jsonify(result)
 
 
-
-        # Optional filter: status
-    txn_status = request.args.get("status")
-    if txn_status:
-        query = query.filter_by(status=txn_status)
-
-    # Optional filter: source_account
-    source = request.args.get("source_account")
-    if source:
-        query = query.filter_by(source_account=source)
-
-    # Optional filter: destination_account
-    destination = request.args.get("destination_account")
-    if destination:
-        query = query.filter_by(destination_account=destination)
-
-
-    # Optional filter: type
-    txn_type = request.args.get("type")
-    if txn_type:
-        query = query.filter_by(type=txn_type)
-
-    transactions = query.all()
-    result = []
-    for t in transactions:
-        result.append({
-            "id": t.id,
-            "date": t.date,
-            "type": t.type,
-            "status": t.status,
-            "source_account": t.source_account,
-            "destination_account": t.destination_account,
-            "amount": t.amount,
-            "purpose": t.purpose
-        })
-    return jsonify(result)
-
-
-
-
-# Get all transactions with optional filters
-
-
-    # Start building query
-    query = Transaction.query
-
-    if t_type:
-        query = query.filter_by(type=t_type)
-    if status:
-        query = query.filter_by(status=status)
-    if start_date and end_date:
-        query = query.filter(Transaction.date.between(start_date, end_date))
-
-    transactions = query.all()
-
-    result = [{
-        "id": t.id,
-        "date": t.date,
-        "type": t.type,
-        "status": t.status,
-        "source_account": t.source_account,
-        "destination_account": t.destination_account,
-        "amount": t.amount,
-        "purpose": t.purpose
-    } for t in transactions]
-
-    return jsonify(result)
-
-
-
-# ✅ Add multiple transactions at once (batch)
-from io import StringIO
-import csv
-
+# Batch add multiple transactions (CSV or JSON)
 @app.route("/api/transactions_batch", methods=["POST"])
 def add_transactions_batch():
     transactions = []
     required_fields = ["date", "type", "status", "source_account", "destination_account", "amount", "purpose"]
 
-    # ======================
-    # CASE 1: CSV upload
-    # ======================
+    # CASE 1: CSV file upload
     if "file" in request.files:
         uploaded_file = request.files["file"]
         stream = StringIO(uploaded_file.stream.read().decode("UTF8"), newline=None)
@@ -233,9 +149,7 @@ def add_transactions_batch():
             )
             transactions.append(txn)
 
-    # ======================
     # CASE 2: JSON list upload
-    # ======================
     else:
         data = request.get_json()
 
@@ -264,6 +178,7 @@ def add_transactions_batch():
     db.session.commit()
     return jsonify({"message": f"{len(transactions)} transactions added!"}), 201
 
+
 # Delete a transaction by ID
 @app.route("/api/transactions/<int:id>", methods=["DELETE"])
 def delete_transaction(id):
@@ -276,6 +191,7 @@ def delete_transaction(id):
     return jsonify({"message": "Transaction deleted!"})
 
 
+# Update a transaction by ID
 @app.route('/api/transactions/<int:id>', methods=['PUT'])
 def update_transaction(id):
     transaction = db.session.get(Transaction, id)
@@ -283,8 +199,8 @@ def update_transaction(id):
         return jsonify({"error": "Transaction not found"}), 404
 
     data = request.get_json()
-
     required_fields = ["date", "type", "status", "source_account", "destination_account", "amount", "purpose"]
+
     for field in required_fields:
         if field not in data or str(data[field]).strip() == "":
             return jsonify({"error": f"Missing or empty field: {field}"}), 400
@@ -304,29 +220,9 @@ def update_transaction(id):
 
     db.session.commit()
     return jsonify({"message": "Transaction updated!"}), 200
- 
 
 
-    # Update fields if valid
-    txn.date = data.get("date", txn.date)
-    txn.type = data.get("type", txn.type)
-    txn.status = data.get("status", txn.status)
-    txn.source_account = data.get("source_account", txn.source_account)
-    txn.destination_account = data.get("destination_account", txn.destination_account)
-    txn.purpose = data.get("purpose", txn.purpose)
-
-    db.session.commit()
-    return jsonify({"message": "Transaction updated!"})
-
-
-
-from fpdf import FPDF
-import pandas as pd
-from datetime import datetime
-
-import io
-from flask import send_file
-
+# Export transactions as CSV
 @app.route("/api/export_csv", methods=["GET"])
 def export_csv():
     transactions = Transaction.query.all()
@@ -356,6 +252,8 @@ def export_csv():
         download_name="SmartBooks_Transactions.csv"
     )
 
+
+# Export transactions as XLSX
 @app.route("/api/export_xlsx", methods=["GET"])
 def export_xlsx():
     transactions = Transaction.query.all()
@@ -386,9 +284,11 @@ def export_xlsx():
         download_name="SmartBooks_Transactions.xlsx"
     )
 
-# 🟢 Start the app
+
+# ====================
+# Run the app
+# ====================
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
     app.run(debug=True)
-
